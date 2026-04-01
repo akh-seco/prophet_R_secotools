@@ -1,5 +1,5 @@
 # Databricks notebook source
-# MAGIC %run /Repos/sandvik/seco-forecasting/install_packages/install_fforma
+# MAGIC %run /Repos/alejandro.kuratomi_hernandez@secotools.com/prophet_R_secotools/sandvik/seco-forecasting/install_packages/install_fforma
 
 # COMMAND ----------
 

@@ -1,9 +1,9 @@
-﻿# Databricks notebook source
-# MAGIC %run /Repos/secotools/pipelines/mount_datalake
+# Databricks notebook source
+# MAGIC %run /Repos/alejandro.kuratomi_hernandez@secotools.com/prophet_R_secotools/secotools/pipelines/mount_datalake
 
 # COMMAND ----------
 
-# MAGIC %run /Repos/secotools/pipelines/income_read_productnumber
+# MAGIC %run /Repos/alejandro.kuratomi_hernandez@secotools.com/prophet_R_secotools/secotools/pipelines/income_read_productnumber
 
 # COMMAND ----------
 

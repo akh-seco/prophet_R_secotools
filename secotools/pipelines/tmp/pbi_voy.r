@@ -1,5 +1,5 @@
-﻿# Databricks notebook source
-# MAGIC %run /Repos/secotools/pipelines/mount_datalake
+# Databricks notebook source
+# MAGIC %run /Repos/alejandro.kuratomi_hernandez@secotools.com/prophet_R_secotools/secotools/pipelines/mount_datalake
 
 # COMMAND ----------
 
@@ -87,7 +87,7 @@ tbl_cache(sc, "voy_data")
 # COMMAND ----------
 
 has_voy_forecast <- voy_data %>%
-  #group_by(ProductNumber, SupplyingWarehouse, SalesMarket) %>% #"Ja det Ã¤r ett problem vi har att sales unit som anvÃ¤nds i voyager inte finns exakt lika nÃ¥gon annanstans utan dÃ¥ Ã¤r det ungefÃ¤rligt lika med sÃ¤ljande land"
+  #group_by(ProductNumber, SupplyingWarehouse, SalesMarket) %>% #"Ja det är ett problem vi har att sales unit som används i voyager inte finns exakt lika någon annanstans utan då är det ungefärligt lika med säljande land"
   group_by(ProductNumber) %>%
   summarise(has_voy_forecast = TRUE) %>%
   ungroup()

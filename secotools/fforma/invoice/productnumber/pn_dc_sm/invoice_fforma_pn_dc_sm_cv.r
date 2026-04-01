@@ -1,5 +1,5 @@
 ﻿# Databricks notebook source
-# MAGIC %run /Repos/secotools/pipelines/invoice_read_pn_dc_sm
+# MAGIC %run /Repos/alejandro.kuratomi_hernandez@secotools.com/prophet_R_secotools/secotools/pipelines/invoice_read_pn_dc_sm
 
 # COMMAND ----------
 

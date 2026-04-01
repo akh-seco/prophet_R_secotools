@@ -1,4 +1,4 @@
-﻿# Databricks notebook source
+# Databricks notebook source
 # MAGIC %python
 # MAGIC if not any(mount.mountPoint == '/mnt/blob/data' for mount in dbutils.fs.mounts()):
 # MAGIC   dbutils.fs.mount(

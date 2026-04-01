@@ -1,11 +1,11 @@
-﻿# Databricks notebook source
+# Databricks notebook source
 # Reads dc order income quantity on ProductLine level
 # Reads and adds scaled (with weighted working days) TotalOrders_scaled column on ProductLine level.
 # Calculates weighted working days on ProductLine level for end_date + 60 months
 
 # COMMAND ----------
 
-# MAGIC %run /Repos/secotools/pipelines/mount_datalake
+# MAGIC %run /Repos/alejandro.kuratomi_hernandez@secotools.com/prophet_R_secotools/secotools/pipelines/mount_datalake
 
 # COMMAND ----------
 

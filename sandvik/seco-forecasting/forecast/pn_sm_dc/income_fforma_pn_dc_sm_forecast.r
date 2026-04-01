@@ -1,5 +1,5 @@
 # Databricks notebook source
-# MAGIC %run /Repos/sandvik/seco-forecasting/read_data/income/income_read_pn_dc_sm
+# MAGIC %run /Repos/alejandro.kuratomi_hernandez@secotools.com/prophet_R_secotools/sandvik/seco-forecasting/read_data/income/income_read_pn_dc_sm
 
 # COMMAND ----------
 

@@ -1,5 +1,5 @@
 # Databricks notebook source
-# MAGIC %run /Repos/sebastian.rosengren@secotools.com/pipelines/mount_datalake
+# MAGIC %run /Repos/alejandro.kuratomi_hernandez@secotools.com/prophet_R_secotools/pipelines/mount_datalake
 
 # COMMAND ----------
 

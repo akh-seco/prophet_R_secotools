@@ -1,5 +1,5 @@
 ﻿# Databricks notebook source
-# MAGIC %run /Repos/secotools/pipelines/income_read_productline_sm
+# MAGIC %run /Repos/alejandro.kuratomi_hernandez@secotools.com/prophet_R_secotools/secotools/pipelines/income_read_productline_sm
 
 # COMMAND ----------
 

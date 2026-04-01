@@ -1,0 +1,353 @@
+# Databricks notebook source
+# MAGIC %run /Repos/sandvik/seco-forecasting/read_data/mount_datalake
+
+# COMMAND ----------
+
+sc %>% spark_session() %>% invoke("catalog") %>% 
+  invoke("clearCache")
+
+# COMMAND ----------
+
+user <- dbutils.secrets.get(scope = "azure_secrets", key = "sqluser")
+password <- dbutils.secrets.get(scope = "azure_secrets", key = "sqlpassword")
+
+url <- "jdbc:sqlserver://seco-azure-info-prod.database.windows.net:1433;database=seco-azure-info-prod"
+ProductForecastSeries <- spark_read_jdbc(sc,
+                        name = "ProductForecastSeries",
+                        options = list(user = user,
+                        password = password,
+                        url = url,
+                        dbtable = "pub.view_ProductForecastSeries")) 
+
+end_period <- ProductForecastSeries %>% pull(ForecastPeriod) %>% max()
+
+ProductForecastSeries <- ProductForecastSeries %>%
+  filter(FCST_YR_PRD == ForecastPeriod | 
+         ((ForecastPeriod == end_period) & (FCST_YR_PRD > ForecastPeriod)) |
+         (ForecastPeriod == 202201 & FCST_YR_PRD == 202202)) %>%
+  rename(Date = FCST_YR_PRD,
+         res_forecast = FCST_RSLT_QTY) %>%
+  mutate(Date = paste0(Date %>% substr(1, 4), "-", Date %>% substr(5, 6), "-01")) %>%
+  select(ForecastPeriod, 
+         SCP_SEQ_NBR, 
+         Date, 
+         res_forecast)
+
+
+# COMMAND ----------
+
+end_period
+
+# COMMAND ----------
+
+user <- dbutils.secrets.get(scope = "azure_secrets", key = "sqluser")
+password <- dbutils.secrets.get(scope = "azure_secrets", key = "sqlpassword")
+
+url <- "jdbc:sqlserver://seco-azure-info-prod.database.windows.net:1433;database=seco-azure-info-prod"
+ProductForecastRoot <- spark_read_jdbc(sc,
+                        name = "ProductForecastRoot",
+                        options = list(user = user,
+                        password = password,
+                        url = url,
+                        dbtable = "pub.view_ProductForecastRoot")) %>%
+  filter(LVL_NBR == 1) %>%
+  rename(ProductNumber = FCST_1_ID,
+         SupplyingWarehouse = FCST_2_ID,
+         SalesMarket = FCST_3_ID) %>%
+  mutate(SupplyingWarehouse = if_else( SupplyingWarehouse == " ", "MISSING", SupplyingWarehouse )) %>%
+  mutate(SupplyingWarehouse = if_else( SupplyingWarehouse == "EDC", "DCE", SupplyingWarehouse )) %>%
+  mutate(SalesMarket = if_else( SalesMarket == " ", "MISSING", SalesMarket )) %>%
+  mutate(SalesMarket = if_else( SalesMarket == "CA", "US", SalesMarket )) %>%
+  select(ForecastPeriod, 
+         SupplyingWarehouse, 
+         SalesMarket, 
+         ProductNumber, 
+         SCP_SEQ_NBR, 
+         LVL_NBR,
+         PROD_GRP_ID) #%>%
+  #distinct() #this?
+
+# COMMAND ----------
+
+ProductForecastSeries
+
+# COMMAND ----------
+
+voy_data <- ProductForecastSeries %>%
+  left_join(ProductForecastRoot) %>%
+  filter(LVL_NBR == 1) %>%
+  select(Date, 
+         SupplyingWarehouse, 
+         SalesMarket, 
+         ProductNumber, 
+         res_forecast) %>% 
+  group_by(Date, 
+           SupplyingWarehouse, 
+           SalesMarket, 
+           ProductNumber) %>%
+  summarise(res_forecast = sum(res_forecast)) %>%
+  ungroup() %>%
+  sdf_register("voy_data")
+
+tbl_cache(sc, "voy_data")
+
+# COMMAND ----------
+
+has_voy_forecast <- voy_data %>%
+  #group_by(ProductNumber, SupplyingWarehouse, SalesMarket) %>% #"Ja det är ett problem vi har att sales unit som används i voyager inte finns exakt lika någon annanstans utan då är det ungefärligt lika med säljande land"
+  group_by(ProductNumber) %>%
+  summarise(has_voy_forecast = TRUE) %>%
+  ungroup()
+
+# COMMAND ----------
+
+user <- dbutils.secrets.get(scope = "azure_secrets", key = "sqluser")
+password <- dbutils.secrets.get(scope = "azure_secrets", key = "sqlpassword")
+
+url <- "jdbc:sqlserver://seco-azure-info-prod.database.windows.net:1433;database=seco-azure-info-prod"
+product_basic <- spark_read_jdbc(sc,
+                        name = "product_basic",
+                        options = list(user = user,
+                        password = password,
+                        url = url,
+                        dbtable = "pub.view_ProductBasic")) %>%
+  rename(ProductNumber = ItemNumber) %>%
+  select(ProductNumber, 
+         ProductLine,
+         ProductAccountGroup,
+         ProductGroupCode,
+         Hierarchy2,
+         InventoryClassCode,
+         Grade,
+         Designation,
+         SupplyMethod,
+         MainSupplier,
+         ProductManagementArea,
+         ProductManagementArea2,
+         GlobalDiscountGroup) %>%
+  mutate(Designation = regexp_replace(Designation, "\"", ""))
+
+# COMMAND ----------
+
+path_in <- paste0("/mnt/blob/forecast/income/final/", "current", "/income_forecast.csv")
+az_forecast <- spark_read_csv(sc, 
+                       path = path_in,
+                       delimiter = ";",
+                       columns = list(
+                         Date = "character",
+                         SupplyingWarehouse = "character",
+                         SalesMarket = "character",
+                         ProductNumber = "character",
+                         TotalOrders = "double",
+                         ProductLine = "character",
+                         values = "double",
+                         values_adj = "double")) %>%
+               select(Date, 
+                      SupplyingWarehouse, 
+                      SalesMarket,
+                      ProductNumber,
+                      TotalOrders,
+                      values,
+                      values_adj)
+
+# COMMAND ----------
+
+has_az_forecast <- az_forecast %>%
+  group_by(ProductNumber, SupplyingWarehouse, SalesMarket) %>%
+  summarise(has_az_forecast = TRUE) %>%
+  ungroup()
+
+# COMMAND ----------
+
+has_az_forecast
+
+# COMMAND ----------
+
+all_data <- az_forecast %>%
+  full_join(voy_data) %>%
+  mutate(tmp = 1) %>%
+  left_join(has_az_forecast) %>%
+  left_join(has_voy_forecast) %>%
+  left_join(product_basic) %>%
+  select(-tmp) %>% #Bug in dplyr full_join - mutate - leftjoin needed
+  mutate(has_az_forecast = if_else(has_az_forecast %>% is.na(), FALSE, has_az_forecast),
+         has_voy_forecast = if_else(has_voy_forecast %>% is.na(), FALSE, has_voy_forecast)) %>%
+  mutate(ProductLine = if_else(ProductLine %>% is.na(), "MISSING", ProductLine)) %>%
+  mutate(has_hierachy = if_else(Hierarchy2 %>% is.na(), FALSE, TRUE)) %>% 
+  mutate(TotalOrders_Forecast = values_adj) %>% 
+  mutate(TotalOrders_Forecast = if_else(is.na(TotalOrders_Forecast), TotalOrders, TotalOrders_Forecast)) %>%
+  sdf_register("all_data")
+
+tbl_cache(sc, "all_data")
+
+# COMMAND ----------
+
+all_data
+
+# COMMAND ----------
+
+end_period
+
+# COMMAND ----------
+
+az_date <- az_forecast %>% 
+  filter(TotalOrders %>% is.na()) %>%
+  pull(Date) %>%
+  unique() %>%
+  sort()
+
+az_date <- az_date[1]
+
+# COMMAND ----------
+
+az_date
+
+# COMMAND ----------
+
+date_tbl <- tibble(Source = c("Voyager", "Azure"), 
+                   ForecastPeriod = c(end_period, az_date))
+
+# COMMAND ----------
+
+date_tbl_spark <- sdf_copy_to(sc, date_tbl)
+
+# COMMAND ----------
+
+all_data %>% 
+  #filter(has_voy_forecast == TRUE) %>%
+  group_by(Date) %>%
+  summarise(prophet = sum(values_adj),
+            res = sum(res_forecast),
+            proph_stat = sum(values)) %>%
+  arrange(Date) %>%
+  print(n = 200)
+
+
+# COMMAND ----------
+
+date_today <- Sys.Date() %>% str_replace_all(pattern = "-", replacement = "_")
+
+path_out_current <- paste0("/mnt/blob/pbi/income/", "current", "/income_forecast_pbi")
+path_out_archive <- paste0("/mnt/blob/pbi/income/archive/", date_today, "/income_forecast_pbi")
+
+dbutils.fs.rm(path_out_current, TRUE)
+dbutils.fs.rm(path_out_archive, TRUE)
+
+spark_write_csv(all_data %>% sdf_repartition(1), 
+                path = path_out_archive, 
+                delimiter = ";", 
+                mode = "overwrite")
+
+# COMMAND ----------
+
+file_list <- dbutils.fs.ls(path_out_archive)
+for(lst in file_list) {
+  if(lst$size < 1000) dbutils.fs.rm(lst$path, TRUE)
+  else{
+    dbutils.fs.mv(lst$path, paste0(path_out_current, "/income_pbi.csv"))
+  }
+}
+
+# COMMAND ----------
+
+user <- dbutils.secrets.get(scope = "azure_secrets", key = "sqluser")
+password <- dbutils.secrets.get(scope = "azure_secrets", key = "sqlpassword")
+url <- "jdbc:sqlserver://seco-azure-info-prod.database.windows.net:1433;database=seco-azure-info-prod"
+
+HLGroupings <- spark_read_jdbc(sc,
+                        name = "HLGroupings",
+                        options = list(user = user,
+                        password = password,
+                        url = url,
+                        dbtable = "pub.view_ForecastClassItem")) %>%
+                rename(ProductNumber = ItemNumber)
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
+date_today <- Sys.Date() %>% str_replace_all(pattern = "-", replacement = "_")
+
+path_out_archive <- paste0("/mnt/blob/pbi/income/archive/HLGroupings")
+
+dbutils.fs.rm(path_out_archive, TRUE)
+
+spark_write_csv(HLGroupings %>% sdf_repartition(1), 
+                path = path_out_archive, 
+                delimiter = ";", 
+                mode = "overwrite")
+
+file_list <- dbutils.fs.ls(path_out_archive)
+for(lst in file_list) {
+  if(lst$size < 1000) dbutils.fs.rm(lst$path, TRUE)
+  else{
+    dbutils.fs.mv(lst$path, paste0("/mnt/blob/pbi/income/HLGroupings", "/HLGroupings.csv"))
+  }
+}
+
+# COMMAND ----------
+
+date_today <- Sys.Date() %>% str_replace_all(pattern = "-", replacement = "_")
+
+path_out_archive <- paste0("/mnt/blob/pbi/income/archive/forecastperiod")
+
+dbutils.fs.rm(path_out_archive, TRUE)
+
+spark_write_csv(date_tbl_spark %>% sdf_repartition(1), 
+                path = path_out_archive, 
+                delimiter = ";", 
+                mode = "overwrite")
+
+file_list <- dbutils.fs.ls(path_out_archive)
+
+for(lst in file_list) {
+  if(!grepl(".csv", lst$name, fixed = TRUE)) dbutils.fs.rm(lst$path, TRUE)
+  else{
+    dbutils.fs.mv(lst$path, paste0("/mnt/blob/pbi/income/forecastperiod", "/forecastperiod.csv"))
+  }
+}
+
+# COMMAND ----------
+
+all_data %>% 
+  #filter(has_voy_forecast == TRUE) %>%
+  group_by(Date) %>%
+  summarise(prophet = sum(values_adj),
+            res = sum(res_forecast),
+            proph_stat = sum(values)) %>%
+  arrange(Date) %>%
+  print(n = 200)
+
+# COMMAND ----------
+
+az_forecast %>%
+  group_by(Date) %>%
+  summarise(values = sum(values),
+            values_adj = sum(values_adj),
+            totalOrders = sum(TotalOrders)) %>%
+  arrange(Date) %>%
+  print(n = 400)
+
+# COMMAND ----------
+
+HLGroupings
+
+# COMMAND ----------
+
+all_data %>%
+  left_join(HLGroupings) %>%
+  filter(ForecastClass == '10 Jabro Solid End Mills') %>%
+  group_by(Date) %>%
+  summarise(TotalOrders = sum(TotalOrders)) %>%
+  arrange(Date) %>%
+  print(n = 200)
+
+# COMMAND ----------
+
+all_data %>%
+  group_by(Date) %>%
+  summarise(TotalOrders = sum(TotalOrders)) %>%
+  arrange(Date) %>%
+  print(n = 200)
